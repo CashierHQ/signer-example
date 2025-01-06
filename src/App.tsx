@@ -4,22 +4,9 @@ import { IcrcXCallBatchCanister } from "./service/method/icrcx.service";
 
 const params = [
   {
-    id: "1",
-    canisterId: "2wdkf-viaaa-aaaam-ackqq-cai",
-    method: "greet_no_consent",
-    arg: "RElETAABcQJtZQ==",
-  },
-  {
-    id: "2",
-    canisterId: "2wdkf-viaaa-aaaam-ackqq-cai",
-    method: "greet_no_consent",
-    arg: "RElETAABcQJtZQ==",
-  },
-  {
-    id: "3",
-    canisterId: "2wdkf-viaaa-aaaam-ackqq-cai",
-    method: "greet_no_consent",
-    arg: "RElETAABcQJtZQ==",
+    canisterId: "x5qut-viaaa-aaaar-qajda-cai",
+    method: "icrc1_transfer",
+    arg: "RElETAZsBvvKAQHG/LYCBLqJ5cIEAqLelOsGAoLz85EMBdijjKgNfWwCs7DawwNorYbKgwUCbgNte259bngBAAEdXdZAg85gOc3s6DkTiv7FBn9RDHSPT6rgmlsBGgIAAAAAAICt4gQ=",
   },
 ];
 
@@ -40,20 +27,9 @@ function App() {
       return;
     }
 
-    const service = new IcrcXCallBatchCanister();
+    const service = new IcrcXCallBatchCanister(agent);
 
-    const rpcRequest = {
-      origin: "https://cashier.io",
-      jsonrpc: "2.0",
-      id: "1",
-      method: "icrcX_batch_call_canisters",
-      params: {
-        sender: user.principal.toText(),
-        requests: params,
-      },
-    };
-
-    const response = await service.onApprove(rpcRequest, agent);
+    const response = await service.icrcxExecute([params]);
 
     console.log("Response", response);
   };

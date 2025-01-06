@@ -1,41 +1,41 @@
+import { callCanisterService } from "../call-canister.service";
 import { Agent } from "@dfinity/agent";
-import { RPCMessage } from "../type";
-import {
-  CallCanisterResponse,
-  callCanisterService,
-} from "../call-canister.service";
+import { CallCanisterResponse } from "../type";
 
-export interface CallCanisterComponentData {
-  origin: string;
-  methodName: string;
-  canisterId: string;
-  sender: string;
-  args: string;
-}
-
-export interface IcrcXRequest {
-  id: string;
+/* Define types */
+export interface ICRCXRequest {
   canisterId: string;
   method: string;
   arg: string;
-  waitFor?: string[];
-  validate?: {
-    canisterId: string;
-    method: string;
+}
+
+export type ParallelRequests = Array<ICRCXRequest>;
+
+/**
+ * Each sub array will execute in parallel and the next sub array will execute after the previous one is completed.
+ */
+export type SequenceRequest = Array<ParallelRequests>;
+
+export type IcrcxRequests = SequenceRequest;
+
+export interface CallCanisterRequest {
+  jsonrpc: string;
+  method: string;
+  params: {
+    sender: string;
+    requests: SequenceRequest;
+    validation?: {
+      canisterId: string;
+      method: string;
+    };
   };
 }
 
-export interface IcrcXDto {
-  sender: string;
-  requests: IcrcXRequest[];
-}
 export interface SuccessResponse {
-  id: string;
   result: CallCanisterResponse;
 }
 
 export interface ErrorResponse {
-  id: string;
   error: {
     code: number;
     message: string;
@@ -46,123 +46,90 @@ export interface ErrorResponse {
 export type IcrcXResponseItem = SuccessResponse | ErrorResponse;
 
 export interface IcrcXResponse {
-  responses: IcrcXResponseItem[];
+  responses: IcrcXResponseItem[][];
 }
-
 export class IcrcXCallBatchCanister {
+  private agent: Agent;
+
+  constructor(agent: Agent) {
+    this.agent = agent;
+  }
   public getMethod(): string {
     return "icrcX_batch_call_canisters";
   }
 
-  /**
-   *
-   * This method only use for delegation
-   * account delegation is not implemented yet
-   */
-  public async onApprove(
-    message: RPCMessage,
-    agent: Agent
-  ): Promise<IcrcXResponse> {
-    console.log("onApprove", message);
-    const icrcxDto = message.params as unknown as IcrcXDto;
-
-    console.log("icrcxDto", icrcxDto);
-
-    const responses: Map<
-      string,
-      | { result: CallCanisterResponse }
-      | {
-          error: {
-            code: number;
-            message: string;
-            data?: unknown;
-          };
-        }
-    > = new Map();
-
-    // create a new array to store requests
-    const requests = [...icrcxDto.requests];
-
-    // this flag use for stop execute left requests when have error
-    let isError = false;
-
-    // run until response size equal requests size
-    while (responses.size < icrcxDto.requests.length) {
-      console.log("requests", requests);
-      // store task
-      const pTasks = [];
-      // store id of request map with index of pTasks
-      const idsTask = [];
-
-      for (let i = 0; i < requests.length; i++) {
-        const request = requests[i];
-        if (isError) {
-          responses.set(request.id, {
-            error: {
-              code: 1001,
-              message: "Not processed due to batch request failure",
-            },
-          });
-          continue;
-        }
-
-        const isHaveResponse = !!responses.get(request.id);
-
-        if (!isHaveResponse) {
-          const task = callCanisterService.call({
-            canisterId: request.canisterId,
-            calledMethodName: request.method,
-            parameters: request.arg,
-            agent,
-          });
-          pTasks.push(task);
-          idsTask.push(request.id);
-        }
-      }
-      const results = await Promise.allSettled(pTasks);
-
-      for (let i = 0; i < results.length; i++) {
-        const result = results[i];
-        if (result.status === "fulfilled") {
-          const responseItem = result.value;
-
-          responses.set(idsTask[i], {
-            result: responseItem,
-          });
-        }
-
-        if (result.status === "rejected") {
-          const error = result.reason;
-          responses.set(idsTask[i], {
-            error: {
-              code: 1000,
-              message: error.message,
-            },
-          });
-          isError = true;
-        }
-      }
-      sleep(60 * 1000);
-    }
-
-    const response: IcrcXResponse = {
-      responses: Array.from(responses).map(([id, response]) => {
-        if ("result" in response) {
-          return {
-            id,
-            result: response.result,
-          };
-        }
-
-        return {
-          id,
-          error: response.error,
-        };
-      }),
+  async icrcxExecute(input: IcrcxRequests): Promise<IcrcXResponse> {
+    const arg = {
+      jsonrpc: "2.0",
+      method: this.getMethod(),
+      params: {
+        sender: (await this.agent.getPrincipal()).toString(),
+        requests: input,
+      },
     };
 
-    return response;
+    const finalResponse: IcrcXResponse = { responses: [] };
+
+    for (let i = 0; i < arg.params.requests.length; i++) {
+      const paralellRequests = arg.params.requests[i];
+      const responsesFromBatchCall = await this.callBatchICRCXRequests(
+        paralellRequests
+      );
+
+      //Process each response and map them to schema, Map them to "SuccessResponse" or "ErrorResponse"
+      const icrcXResponseItems: IcrcXResponseItem[] = this.processResponse(
+        responsesFromBatchCall
+      );
+      finalResponse.responses.push(icrcXResponseItems);
+    }
+    return finalResponse;
+  }
+
+  private processResponse(
+    response: Array<IcrcXResponseItem>
+  ): IcrcXResponseItem[] {
+    const responses: IcrcXResponseItem[] = [];
+    response.forEach((response) => {
+      if ("result" in response) {
+        responses.push({ result: response.result });
+      } else {
+        responses.push({ error: response.error });
+      }
+    });
+    return responses;
+  }
+
+  private async callBatchICRCXRequests(
+    requests: ParallelRequests
+  ): Promise<Array<IcrcXResponseItem>> {
+    const process_tasks: Promise<CallCanisterResponse>[] = [];
+    const responses: Array<IcrcXResponseItem> = [];
+
+    requests.forEach((request) => {
+      const task = callCanisterService.call({
+        canisterId: request.canisterId,
+        calledMethodName: request.method,
+        parameters: request.arg,
+        agent: this.agent,
+      });
+      process_tasks.push(task);
+    });
+    const results = await Promise.allSettled(process_tasks);
+    // Process each result
+    results.forEach((result) => {
+      if (result.status === "fulfilled") {
+        const response: CallCanisterResponse = result.value;
+        responses.push({ result: response });
+      } else if (result.status === "rejected") {
+        const error = result.reason;
+        responses.push({
+          error: {
+            code: 1000,
+            message: error.message,
+          },
+        });
+      }
+    });
+    return responses;
   }
 }
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

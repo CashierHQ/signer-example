@@ -17,29 +17,7 @@ import { AgentError } from "@dfinity/agent/lib/cjs/errors";
 import { Principal } from "@dfinity/principal";
 import { fromBase64 } from "@nfid/identitykit";
 import { Buffer } from "buffer";
-export interface CallCanisterRequest {
-  canisterId: string;
-  calledMethodName: string;
-  parameters: string;
-  agent: Agent;
-}
-
-export interface CallCanisterResponse {
-  contentMap: string;
-  certificate: string;
-}
-
-export interface CallCanisterRequest {
-  canisterId: string;
-  calledMethodName: string;
-  parameters: string;
-  agent: Agent;
-}
-
-export interface CallCanisterResponse {
-  contentMap: string;
-  certificate: string;
-}
+import { CallCanisterRequest, CallCanisterResponse } from "./type";
 
 export class CallCanisterService {
   public async call(
