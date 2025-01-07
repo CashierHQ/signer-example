@@ -2,22 +2,29 @@
 import {
   Agent,
   bufFromBufLike,
-  CallRequest,
   Cbor,
   Certificate,
   v3ResponseBody,
   blsVerify,
   lookupResultToBuffer,
   UpdateCallRejectedError,
-  defaultStrategy,
   pollForResponse,
   v2ResponseBody,
 } from "@dfinity/agent";
 import { AgentError } from "@dfinity/agent/lib/cjs/errors";
 import { Principal } from "@dfinity/principal";
 import { fromBase64 } from "@nfid/identitykit";
-import { Buffer } from "buffer";
 import { CallCanisterRequest, CallCanisterResponse } from "./type";
+
+export const toBase64 = (bytes: ArrayBuffer): string => {
+  if (typeof globalThis.Buffer !== "undefined") {
+    return globalThis.Buffer.from(bytes).toString("base64");
+  }
+  if (typeof globalThis.btoa !== "undefined") {
+    return btoa(String.fromCharCode(...new Uint8Array(bytes)));
+  }
+  throw Error("Could not encode base64 string");
+};
 
 export class CallCanisterService {
   public async call(
@@ -30,11 +37,8 @@ export class CallCanisterService {
         request.agent,
         fromBase64(request.parameters)
       );
-      const certificate: string = Buffer.from(response.certificate).toString(
-        "base64"
-      );
-      const cborContentMap = Cbor.encode(response.contentMap);
-      const contentMap: string = Buffer.from(cborContentMap).toString("base64");
+      const certificate: string = toBase64(response.certificate);
+      const contentMap: string = toBase64(response.contentMap!);
 
       return {
         certificate,
@@ -56,17 +60,19 @@ export class CallCanisterService {
     methodName: string,
     agent: Agent,
     arg: ArrayBuffer
-  ): Promise<{ certificate: Uint8Array; contentMap: CallRequest | undefined }> {
+  ): Promise<{ certificate: Uint8Array; contentMap: ArrayBuffer | undefined }> {
     const cid = Principal.from(canisterId);
 
     if (agent.rootKey == null)
       throw new AgentError("Agent root key not initialized before making call");
 
-    const { requestId, response, requestDetails } = await agent.call(cid, {
+    const { requestId, response } = await agent.call(cid, {
       methodName,
       arg,
       effectiveCanisterId: cid,
     });
+
+    console.log("response", response);
 
     let certificate: Certificate | undefined;
 
@@ -136,21 +142,14 @@ export class CallCanisterService {
     }
 
     // Fall back to polling if we receive an Accepted response code
-    if (response.status === 202) {
-      const pollStrategy = defaultStrategy();
-      // Contains the certificate and the reply from the boundary node
-      const response = await pollForResponse(
-        agent,
-        cid,
-        requestId,
-        pollStrategy,
-        blsVerify
-      );
-      certificate = response.certificate;
-    }
+    // Contains the certificate and the reply from the boundary node
+    const poolResponse = await pollForResponse(agent, cid, requestId);
+    console.log("poolResponse", poolResponse);
+    certificate = poolResponse.certificate;
+    const reply = poolResponse.reply;
 
     return {
-      contentMap: requestDetails,
+      contentMap: reply,
       certificate: new Uint8Array(Cbor.encode((certificate as any).cert)),
     };
   }

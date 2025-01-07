@@ -8,6 +8,8 @@ import "@nfid/identitykit/react/styles.css";
 import { IdentityKitProvider } from "@nfid/identitykit/react";
 import { IdentityKitAuthType } from "@nfid/identitykit";
 
+import "isomorphic-fetch";
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <IdentityKitProvider

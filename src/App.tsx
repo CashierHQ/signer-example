@@ -1,6 +1,7 @@
 import "./App.css";
-import { ConnectWallet, useAgent, useAuth } from "@nfid/identitykit/react";
+import { ConnectWallet, useAuth, useIdentity } from "@nfid/identitykit/react";
 import { IcrcXCallBatchCanister } from "./service/method/icrcx.service";
+import { HttpAgent } from "@dfinity/agent";
 
 const params = [
   {
@@ -12,8 +13,10 @@ const params = [
 
 function App() {
   const { user } = useAuth();
-  const agent = useAgent({
+  const identity = useIdentity();
+  const agent = HttpAgent.createSync({
     host: "https://ic0.app",
+    identity: identity,
   });
 
   const executeMockReq = async () => {
